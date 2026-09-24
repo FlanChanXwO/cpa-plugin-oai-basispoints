@@ -32,43 +32,6 @@ plugins:
 
 插件的 `auth.parse` 会接管 CPA 中 `type: codex` 的 OAuth 文件，并为同一个文件展开两条内存认证：一条保留原生 `codex`，另一条是 `oai-basispoints` 虚拟认证。这样现有 Codex 模型继续使用 CPA 原生执行器，`gpt-6-astra-basispoints` 则使用本插件；不会生成或改写 OAuth 文件。原生 Codex 记录保留源 OAuth 元数据，供原生执行器读取访问令牌和刷新令牌。注意：当前 CPA 会把这两条记录都标记为虚拟认证，不持久化原生记录的刷新结果；Basis Points 记录也不会自动同步原生记录在内存中刷新的 JWT。源 JWT 过期时，需要先通过 CPA 更新或重新导入源 OAuth 凭据，再重新加载，单纯重载过期文件无效。流式响应遵循 Responses SSE 格式，但为保证工具调用可在完整 item 上做安全转换，当前会先读完上游 SSE 再回放给客户端，不是 token 级实时转发。
 
-### 配置多个模型
-
-在 `plugins.configs.oai-basispoints` 下使用 `models` 声明启用的客户端别名，使用 `model_mappings` 指定每个别名实际调用的上游模型。**条目数量不固定，不限于两个模型，也不需要复制插件实例。**
-
-```yaml
-plugins:
-  enabled: true
-  configs:
-    oai-basispoints:
-      enabled: true
-      responses_url: https://bps.openai.com/basispoints/api/responses
-      # 未单独映射的别名使用的默认上游模型。
-      upstream_model: gpt-6-astra
-      # 客户端请求时使用这些别名；未指定模型时选第一项。
-      models:
-        - gpt-6-astra-basispoints
-        - gpt-5.6-sol-basispoints
-      # 可以继续添加更多映射，数量不写死。
-      model_mappings:
-        gpt-6-astra-basispoints: gpt-6-astra
-        gpt-5.6-sol-basispoints: gpt-5.6-sol
-      timeout_seconds: 300
-      max_response_bytes: 67108864
-      auth_mode: chatgpt
-      # 仅由 YAML 管理，避免旧 settings.json 覆盖模型配置。
-      data_dir: ""
-```
-
-- **添加模型**：在 `models` 增加别名，并在 `model_mappings` 增加同名键及其上游模型名；重复此操作即可添加第三个、第四个或更多模型。
-- **移除模型**：同时移除别名及对应映射。映射引用未启用的别名、空的键或值、去除首尾空白后重复的映射键都会被拒绝。
-- **原有配置不变**：不填写 `model_mappings` 时，所有别名仍调用 `upstream_model`；有映射时优先使用对应映射，未单独映射的别名仍调用全局上游。
-- **统一路由**：模型注册、普通请求、流式请求及 Codex 模型目录元数据均按同一份映射处理。不同上游的上下文元数据从各自的规范模型读取，不复用 Astra 的容量。
-
-逐项中文注释见 `config.example.yaml`。已有 `plugins` / `configs` 时合并子项，不要覆盖其他插件或重复声明同名 YAML 节点。**需要使用包含此功能的新插件构建；仅修改配置不会让旧版本获得多模型支持。** 替换插件动态库并修改配置后重启 CPA。示例不代表已对 Basis Points 的所有模型完成真实联调，实际可用模型及支持参数以服务和当前账号权限为准。
-
-当前配置优先级为：默认值 → CPA 传入的 YAML → `data_dir/settings.json` 中已有字段。示例显式设置 `data_dir: ""`，不读取或写入该持久化文件，也不会删除旧文件或影响 OAuth 凭据读取。若保留默认目录 `plugins/oai-basispoints-data`，修改 YAML 可能被旧设置覆盖；应先停止 CPA、备份 `settings.json`，再同步修改对应字段后启动。
-
 ## 构建
 
 ```bash
