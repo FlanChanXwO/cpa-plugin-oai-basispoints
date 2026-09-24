@@ -219,7 +219,7 @@ func (s *Service) status() map[string]any {
 		"upstream_model":    cfg.UpstreamModel,
 		"models":            cfg.Models,
 		"stopped":           stopped,
-		"reasoning_efforts": []string{"low", "medium", "high", "xhigh"},
+		"reasoning_efforts": []string{"low", "medium", "high", "xhigh", "ultra"},
 	}
 }
 
@@ -265,9 +265,9 @@ func modelRegistration(cfg Config) map[string]any {
 			"OwnedBy":                    Provider,
 			"DisplayName":                model,
 			"SupportedGenerationMethods": []string{"responses"},
-			"SupportedInputModalities":   []string{"text"},
+			"SupportedInputModalities":   []string{"text", "image"},
 			"SupportedOutputModalities":  []string{"text"},
-			"Thinking":                   map[string]any{"Min": 0, "Max": 0},
+			"Thinking":                   map[string]any{"Levels": []string{"low", "medium", "high", "xhigh", "max", "ultra"}},
 			"UserDefined":                true,
 		})
 	}

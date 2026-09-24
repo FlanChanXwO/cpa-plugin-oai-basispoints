@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -102,7 +103,7 @@ func (s *Service) upstreamRequest(request ExecutorRequest, body map[string]any, 
 		return upstreamResponse{}, fail(502, "upstream_transport", "Basis Points transport failed: "+safeError(err))
 	}
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return response, statusError(response.StatusCode, response.Body)
+		return response, upstreamRequestError(response.StatusCode, response.Body, body, c)
 	}
 	return response, nil
 }
@@ -124,7 +125,12 @@ func (s *Service) upstreamStream(request ExecutorRequest, body map[string]any, c
 		return stream, fail(502, "upstream_transport", "host returned no Basis Points stream ID")
 	}
 	if stream.StatusCode < 200 || stream.StatusCode >= 300 {
-		return stream, fail(stream.StatusCode, "upstream_error", "Basis Points stream was rejected")
+		// 非 2xx 仍有响应流；读取错误原因后关闭，避免丢失正文和泄漏流。
+		raw, err := s.readUpstreamStream(stream)
+		if err != nil {
+			return stream, fail(stream.StatusCode, "upstream_error", "Basis Points error body could not be read: "+safeError(err))
+		}
+		return stream, upstreamRequestError(stream.StatusCode, raw, body, c)
 	}
 	return stream, nil
 }
@@ -246,4 +252,29 @@ func (d *sseDecoder) feed(chunk []byte, emit func(event, data string) error) err
 			d.data = append(d.data, strings.TrimPrefix(value, " "))
 		}
 	}
+}
+
+// 仅附加非敏感摘要，不记录对话正文、图片内容或认证信息。
+func upstreamRequestError(status int, raw []byte, body map[string]any, c credential) error {
+	redacted := string(raw)
+	for _, secret := range []string{c.AccessToken, c.AccountID, c.Email} {
+		if secret != "" {
+			redacted = strings.ReplaceAll(redacted, secret, "[REDACTED]")
+		}
+	}
+	message := redactTokenMessage(errorMessage([]byte(redacted)))
+	images, originalDetails := 0, 0
+	items, _ := body["input"].([]any)
+	for _, value := range items {
+		parts, _ := objectValue(value)["content"].([]any)
+		for _, part := range parts {
+			if stringValue(objectValue(part)["type"]) == "input_image" {
+				images++
+				if stringValue(objectValue(part)["detail"]) == "original" {
+					originalDetails++
+				}
+			}
+		}
+	}
+	return fail(status, "upstream_error", fmt.Sprintf("Basis Points HTTP %d: %s (reasoning_effort=%s; input_images=%d; original_detail_images=%d)", status, message, stringValue(body["reasoning_effort"]), images, originalDetails))
 }

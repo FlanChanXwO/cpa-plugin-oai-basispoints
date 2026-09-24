@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	Version        = "0.1.1"
+	Version        = "0.1.3"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -20,7 +20,7 @@ const (
 )
 
 var supportedReasoningEfforts = map[string]struct{}{
-	"low": {}, "medium": {}, "high": {}, "xhigh": {},
+	"low": {}, "medium": {}, "high": {}, "xhigh": {}, "ultra": {},
 }
 
 // APIError carries a downstream HTTP status through the CPA plugin envelope.
@@ -182,7 +182,7 @@ func normalizeEffort(value any) string {
 	s, _ := value.(string)
 	s = strings.ToLower(strings.TrimSpace(s))
 	switch s {
-	case "x-high", "extra-high", "extra_high":
+	case "x-high", "extra-high", "extra_high", "max":
 		s = "xhigh"
 	}
 	if _, ok := supportedReasoningEfforts[s]; ok {
@@ -229,6 +229,24 @@ func numberValue(value any) int64 {
 func errorMessage(body []byte) string {
 	var object map[string]any
 	if json.Unmarshal(body, &object) == nil {
+		// 校验错误仅保留字段路径和原因，避免把 input 中的私有内容写入日志。
+		if details, ok := object["detail"].([]any); ok && len(details) > 0 {
+			safe := make([]map[string]any, 0, len(details))
+			for _, value := range details {
+				entry := objectValue(value)
+				if entry == nil {
+					continue
+				}
+				safe = append(safe, map[string]any{"loc": entry["loc"], "msg": entry["msg"], "type": entry["type"]})
+			}
+			if len(safe) > 0 {
+				return string(jsonBytes(map[string]any{"detail": safe}))
+			}
+		}
+		if detail := stringValue(object["detail"]); detail != "" {
+			return detail
+		}
+
 		if nested, ok := object["error"].(map[string]any); ok {
 			if message := stringValue(nested["message"]); message != "" {
 				return message
@@ -249,13 +267,6 @@ func errorMessage(body []byte) string {
 		return message
 	}
 	return "Basis Points upstream request failed"
-}
-
-func statusError(status int, body []byte) error {
-	if status < 400 {
-		status = 502
-	}
-	return fail(status, "upstream_error", errorMessage(body))
 }
 
 func timeoutError(cfg Config) error {

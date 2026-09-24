@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -219,7 +220,7 @@ func authData(raw []byte, fileName string, c credential) map[string]any {
 	}
 }
 
-func nativeCodexAuthData(raw []byte, fileName string, c credential) map[string]any {
+func nativeCodexAuthData(raw []byte, fileName string, c credential) (map[string]any, error) {
 	// 在 Basis Points 虚拟记录旁保留原生 Codex 记录，使既有 Codex 模型
 	// 继续走 CPA 原生执行器，同时为 oai-basispoints 模型提供独立认证。
 	label := c.Email
@@ -227,11 +228,16 @@ func nativeCodexAuthData(raw []byte, fileName string, c credential) map[string]a
 		label = fileName
 	}
 	planType := codexPlanType(raw, c.AccessToken)
-	metadata := map[string]any{
-		"type":       AuthProviderID,
-		"auth_kind":  "oauth",
-		"account_id": c.AccountID,
-		"auth_mode":  c.AuthMode,
+	// CPA 原生执行器直接读取 Metadata，必须保留源凭据字段。
+	var metadata map[string]any
+	if err := json.Unmarshal(raw, &metadata); err != nil {
+		return nil, fail(400, "invalid_auth", "OAuth credential is not valid JSON")
+	}
+	metadata["type"] = AuthProviderID
+	metadata["auth_kind"] = "oauth"
+	metadata["access_token"] = c.AccessToken
+	if firstString(metadata, "account_id") == "" {
+		metadata["account_id"] = c.AccountID
 	}
 	attributes := map[string]string{
 		"auth_kind":  "oauth",
@@ -242,6 +248,16 @@ func nativeCodexAuthData(raw []byte, fileName string, c credential) map[string]a
 		metadata["plan_type"] = planType
 		attributes["plan_type"] = planType
 	}
+	if priority, ok := metadata["priority"].(float64); ok {
+		attributes["priority"] = strconv.Itoa(int(priority))
+	} else if priority := strings.TrimSpace(stringValue(metadata["priority"])); priority != "" {
+		if _, err := strconv.Atoi(priority); err == nil {
+			attributes["priority"] = priority
+		}
+	}
+	if note := strings.TrimSpace(stringValue(metadata["note"])); note != "" {
+		attributes["note"] = note
+	}
 	return map[string]any{
 		"Provider":    AuthProviderID,
 		"ID":          fileName,
@@ -250,13 +266,20 @@ func nativeCodexAuthData(raw []byte, fileName string, c credential) map[string]a
 		"StorageJSON": raw,
 		"Metadata":    metadata,
 		"Attributes":  attributes,
-	}
+	}, nil
 }
 
 func codexPlanType(raw []byte, accessToken string) string {
 	var root map[string]any
 	if json.Unmarshal(raw, &root) == nil {
 		if planType := firstString(root, "plan_type", "planType"); planType != "" {
+			return planType
+		}
+	}
+	// 与 CPA 原生解析一致，优先读取 id_token 套餐。
+	idClaims := jwtPayload(stringValue(root["id_token"]))
+	if auth, ok := idClaims["https://api.openai.com/auth"].(map[string]any); ok {
+		if planType := firstString(auth, "chatgpt_plan_type", "plan_type"); planType != "" {
 			return planType
 		}
 	}
@@ -291,10 +314,14 @@ func authParse(raw []byte) (map[string]any, error) {
 	if provider == Provider {
 		return map[string]any{"Handled": true, "Auth": virtual}, nil
 	}
+	native, err := nativeCodexAuthData(request.RawJSON, fileName, c)
+	if err != nil {
+		return nil, err
+	}
 	return map[string]any{
 		"Handled": true,
 		"Auths": []any{
-			nativeCodexAuthData(request.RawJSON, fileName, c),
+			native,
 			virtual,
 		},
 	}, nil
