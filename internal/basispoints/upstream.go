@@ -37,12 +37,7 @@ func (s *Service) prepareRequest(request ExecutorRequest) (map[string]any, crede
 	if model == "" {
 		model = strings.TrimSpace(request.Model)
 	}
-	if model == "" {
-		model = cfg.Models[0]
-	}
-	if !isResponseModel(model, cfg) && model != cfg.UpstreamModel {
-		return nil, credential{}, fail(400, "unsupported_model", "model is not enabled in oai-basispoints: "+model)
-	}
+	source["model"] = model
 	source["stream"] = request.Stream
 	prepared, err := prepareResponsesBody(source, cfg)
 	if err != nil {

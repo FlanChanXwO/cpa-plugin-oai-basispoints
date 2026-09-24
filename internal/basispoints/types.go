@@ -3,13 +3,14 @@ package basispoints
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"strings"
 )
 
 const (
-	Version        = "0.1.8"
+	Version        = "0.1.9"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -109,14 +110,15 @@ type streamChunk struct {
 }
 
 type Config struct {
-	DataDir          string   `yaml:"data_dir" json:"data_dir"`
-	ResponsesURL     string   `yaml:"responses_url" json:"responses_url"`
-	UpstreamModel    string   `yaml:"upstream_model" json:"upstream_model"`
-	Models           []string `yaml:"models" json:"models"`
-	TimeoutSeconds   int      `yaml:"timeout_seconds" json:"timeout_seconds"`
-	MaxResponseBytes int      `yaml:"max_response_bytes" json:"max_response_bytes"`
-	AuthMode         string   `yaml:"auth_mode" json:"auth_mode"`
-	ToolsVersionID   string   `yaml:"tools_version_id" json:"tools_version_id"`
+	DataDir          string            `yaml:"data_dir" json:"data_dir"`
+	ResponsesURL     string            `yaml:"responses_url" json:"responses_url"`
+	UpstreamModel    string            `yaml:"upstream_model" json:"upstream_model"`
+	Models           []string          `yaml:"models" json:"models"`
+	ModelMappings    map[string]string `yaml:"model_mappings" json:"model_mappings"`
+	TimeoutSeconds   int               `yaml:"timeout_seconds" json:"timeout_seconds"`
+	MaxResponseBytes int               `yaml:"max_response_bytes" json:"max_response_bytes"`
+	AuthMode         string            `yaml:"auth_mode" json:"auth_mode"`
+	ToolsVersionID   string            `yaml:"tools_version_id" json:"tools_version_id"`
 }
 
 func defaultConfig() Config {
@@ -169,6 +171,24 @@ func (c *Config) normalize() error {
 	}
 	if len(models) == 0 {
 		models = []string{DefaultModelID}
+		seen[DefaultModelID] = true
+	}
+	if c.ModelMappings != nil {
+		mappings := make(map[string]string, len(c.ModelMappings))
+		for alias, upstream := range c.ModelMappings {
+			alias, upstream = strings.TrimSpace(alias), strings.TrimSpace(upstream)
+			if alias == "" || upstream == "" {
+				return fail(400, "invalid_config", "model_mappings requires non-empty aliases and upstream model names")
+			}
+			if !seen[alias] {
+				return fail(400, "invalid_config", "model_mappings alias is not enabled in models: "+alias)
+			}
+			if _, exists := mappings[alias]; exists {
+				return fail(400, "invalid_config", "model_mappings contains a duplicate normalized alias: "+alias)
+			}
+			mappings[alias] = upstream
+		}
+		c.ModelMappings = mappings
 	}
 	c.Models = models
 	return nil
@@ -176,6 +196,7 @@ func (c *Config) normalize() error {
 
 func (c Config) clone() Config {
 	c.Models = append([]string(nil), c.Models...)
+	c.ModelMappings = maps.Clone(c.ModelMappings)
 	return c
 }
 
@@ -274,15 +295,32 @@ func timeoutError(cfg Config) error {
 	return fail(504, "upstream_timeout", fmt.Sprintf("Basis Points request timed out after %d seconds", cfg.TimeoutSeconds))
 }
 
-func isResponseModel(model string, cfg Config) bool {
-	model = strings.TrimSpace(model)
-	if model == "" {
-		return false
-	}
-	for _, candidate := range cfg.Models {
-		if model == candidate {
-			return true
+// upstreamModelForAlias 只解析已启用的别名；未单独映射时沿用原有全局配置。
+func (c Config) upstreamModelForAlias(alias string) (string, bool) {
+	for _, candidate := range c.Models {
+		if alias == candidate {
+			if upstream, exists := c.ModelMappings[alias]; exists {
+				return upstream, true
+			}
+			return c.UpstreamModel, true
 		}
 	}
-	return false
+	return "", false
+}
+
+// resolveUpstreamModel 同时接受客户端别名和 CPA 执行器传入的已配置上游名称。
+func (c Config) resolveUpstreamModel(model string) (string, bool) {
+	model = strings.TrimSpace(model)
+	if model == "" && len(c.Models) > 0 {
+		model = c.Models[0]
+	}
+	if upstream, ok := c.upstreamModelForAlias(model); ok {
+		return upstream, true
+	}
+	for _, alias := range c.Models {
+		if upstream, ok := c.upstreamModelForAlias(alias); ok && model == upstream {
+			return upstream, true
+		}
+	}
+	return "", false
 }

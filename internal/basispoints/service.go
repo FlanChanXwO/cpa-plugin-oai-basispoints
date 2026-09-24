@@ -221,6 +221,7 @@ func (s *Service) status() map[string]any {
 		"responses_url":     cfg.ResponsesURL,
 		"upstream_model":    cfg.UpstreamModel,
 		"models":            cfg.Models,
+		"model_mappings":    cfg.ModelMappings,
 		"stopped":           stopped,
 		"reasoning_efforts": []string{"low", "medium", "high", "xhigh", "ultra"},
 	}
@@ -233,12 +234,13 @@ func registration(cfg Config) map[string]any {
 			"Name":             "OpenAI Basis Points",
 			"Version":          Version,
 			"Author":           "jaxson-wang",
-			"GitHubRepository": "https://github.com/xiao-qiu-qiu/ClinePassBridge",
+			"GitHubRepository": "https://github.com/JaxsonWang/cpa-plugin-oai-basispoints",
 			"Description":      "CPA Responses adapter for bps.openai.com with safe client-tool relay",
 			"ConfigFields": []map[string]any{
 				{"Name": "responses_url", "Type": "string", "Description": "Basis Points Responses endpoint."},
-				{"Name": "upstream_model", "Type": "string", "Description": "Model name sent to Basis Points."},
-				{"Name": "models", "Type": "array", "Description": "CPA-facing model aliases served by this plugin."},
+				{"Name": "upstream_model", "Type": "string", "Description": "未单独配置 model_mappings 的别名使用的上游模型。"},
+				{"Name": "models", "Type": "array", "Description": "启用的客户端模型别名列表，数量不限。"},
+				{"Name": "model_mappings", "Type": "object", "Description": "客户端别名到实际上游模型的映射；键必须已列入 models。"},
 				{"Name": "timeout_seconds", "Type": "integer", "Description": "Upstream request timeout."},
 				{"Name": "max_response_bytes", "Type": "integer", "Description": "Maximum upstream response size."},
 				{"Name": "auth_mode", "Type": "string", "Description": "Basis Points authentication mode; normally chatgpt."},
@@ -262,10 +264,11 @@ func registration(cfg Config) map[string]any {
 func modelRegistration(cfg Config) map[string]any {
 	models := make([]map[string]any, 0, len(cfg.Models))
 	for _, model := range cfg.Models {
+		upstream, _ := cfg.upstreamModelForAlias(model)
 		models = append(models, map[string]any{
 			"ID":                         model,
 			"Object":                     "model",
-			"Name":                       cfg.UpstreamModel,
+			"Name":                       upstream,
 			"OwnedBy":                    Provider,
 			"DisplayName":                model,
 			"SupportedGenerationMethods": []string{"responses"},

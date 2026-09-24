@@ -506,6 +506,11 @@ func prependBeforeCompaction(items []any, prefix []any) []any {
 }
 
 func prepareResponsesBody(source map[string]any, cfg Config) (map[string]any, error) {
+	model := stringValue(source["model"])
+	upstream, ok := cfg.resolveUpstreamModel(model)
+	if !ok {
+		return nil, fail(400, "unsupported_model", "model is not enabled in oai-basispoints: "+model)
+	}
 	if clientToolCallRequired(source) && len(callableClientToolSpecs(source)) == 0 {
 		return nil, fail(400, "invalid_tool_choice", "tool_choice does not select any available client tool")
 	}
@@ -522,7 +527,7 @@ func prepareResponsesBody(source map[string]any, cfg Config) (map[string]any, er
 	inputItems = prependBeforeCompaction(inputItems, prologue)
 
 	output := map[string]any{
-		"model":            cfg.UpstreamModel,
+		"model":            upstream,
 		"model_selection":  "explicit",
 		"stream":           source["stream"] == true,
 		"store":            false,

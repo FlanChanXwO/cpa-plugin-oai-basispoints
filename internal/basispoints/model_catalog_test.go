@@ -174,3 +174,64 @@ func TestModelCatalogDoesNotRetainGenericEffectivePercentage(t *testing.T) {
 		t.Fatal("retained stale generic percentage")
 	}
 }
+
+func TestModelCatalogRoutesEachMappedAlias(t *testing.T) {
+	for _, prefix := range []string{"", "tenant/"} {
+		t.Run(prefix, func(t *testing.T) {
+			svc := NewService()
+			svc.cfg = mappedConfig(3)
+			var entries []any
+			for i, alias := range svc.cfg.Models {
+				canonical := map[string]any{"slug": prefix + svc.cfg.ModelMappings[alias], "context_window": 10000 + i*1000, "max_context_window": 20000 + i*1000}
+				if i%2 == 0 {
+					canonical["effective_context_window_percent"] = 90 + i
+				}
+				entries = append(entries, canonical, map[string]any{"slug": prefix + alias, "context_window": 1, "max_context_window": 1, "effective_context_window_percent": 1, "base_instructions": "keep alias instructions"})
+			}
+			before := jsonBytes(map[string]any{"models": entries})
+			result, err := svc.Handle("response.intercept_after", jsonBytes(catalogRequest(before)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, old := decodedCatalog(t, before)
+			_, updated := decodedCatalog(t, result.(map[string]any)["Body"].([]byte))
+			for i := range svc.cfg.Models {
+				canonical, alias := i*2, i*2+1
+				if !reflect.DeepEqual(old[canonical], updated[canonical]) {
+					t.Fatal("native model metadata changed")
+				}
+				for _, field := range []string{"context_window", "max_context_window", "effective_context_window_percent"} {
+					if !reflect.DeepEqual(updated[alias][field], old[canonical][field]) {
+						t.Fatalf("model %d has another model's %s", i, field)
+					}
+				}
+				for _, field := range []string{"slug", "base_instructions"} {
+					if !reflect.DeepEqual(old[alias][field], updated[alias][field]) {
+						t.Fatalf("alias field changed: %s", field)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestModelCatalogMappedAliasRequiresOwnCanonical(t *testing.T) {
+	for _, prefix := range []string{"", "tenant/"} {
+		svc := NewService()
+		svc.cfg = mappedConfig(3)
+		alias := svc.cfg.Models[1]
+		entries := []any{
+			map[string]any{"slug": prefix + DefaultUpstreamModel, "context_window": 10000, "max_context_window": 20000},
+			map[string]any{"slug": prefix + svc.cfg.ModelMappings[svc.cfg.Models[0]], "context_window": 30000, "max_context_window": 40000},
+			map[string]any{"slug": prefix + alias, "context_window": 1, "max_context_window": 1},
+		}
+		if prefix != "" {
+			entries = append(entries, map[string]any{"slug": svc.cfg.ModelMappings[alias], "context_window": 50000, "max_context_window": 60000})
+		}
+		result, err := svc.Handle("response.intercept_after", jsonBytes(catalogRequest(jsonBytes(map[string]any{"models": entries}))))
+		apiErr, ok := err.(*APIError)
+		if result != nil || !ok || apiErr.Kind != "model_metadata_missing" || !strings.Contains(err.Error(), prefix+svc.cfg.ModelMappings[alias]) {
+			t.Fatalf("missing mapped canonical was not reported: %v", err)
+		}
+	}
+}

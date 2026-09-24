@@ -101,17 +101,13 @@ func (s *Service) interceptModelCatalog(raw json.RawMessage) (any, error) {
 }
 
 func catalogCanonicalSlug(slug string, cfg Config) (string, bool) {
-	for _, alias := range cfg.Models {
-		if slug == alias {
-			return cfg.UpstreamModel, true
-		}
+	if upstream, ok := cfg.upstreamModelForAlias(slug); ok {
+		return upstream, true
 	}
 	// CPA 的凭据前缀属于路由标识，仅使用同一前缀下的规范模型。
 	if prefix, base, found := strings.Cut(slug, "/"); found {
-		for _, alias := range cfg.Models {
-			if base == alias {
-				return prefix + "/" + cfg.UpstreamModel, true
-			}
+		if upstream, ok := cfg.upstreamModelForAlias(base); ok {
+			return prefix + "/" + upstream, true
 		}
 	}
 	return "", false
