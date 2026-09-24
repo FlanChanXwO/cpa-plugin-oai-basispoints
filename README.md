@@ -1,10 +1,6 @@
 # CPA OpenAI Basis Points 插件
 
-这是一个 CLIProxyAPI（CPA）原生插件，用 CPA 已有的 ChatGPT/Codex OAuth 凭据直接请求：
-
-`https://bps.openai.com/basispoints/api/responses`
-
-插件不会执行 OfficeJS。客户端传入的 `tools` 会被从上游请求体移除，并在 developer 消息中改写为自然语言工具目录。模型请求工具时，插件只接受 Basis Points 原生的 `run_officejs`，从其 `code` 字段二次解码出真实客户端工具，再把调用转回客户端。客户端回传工具结果后，插件会把之前完整的原生 `run_officejs` item（包括 `id`、`summary`、`references` 等模型字段）和标准 `function_call_output` 一起回放给上游。
+这是一个 CLIProxyAPI（CPA）原生插件，用 CPA 已有的 ChatGPT/Codex OAuth 凭据直接请求。
 
 ## 通过 CPA 插件商店安装（推荐）
 
@@ -43,16 +39,6 @@ make test
 make build
 ```
 
-本机是 macOS/ARM 时，可使用 Zig 提供 Linux AMD64 C 编译器：
-
-```bash
-mkdir -p build/linux/amd64
-CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
-  CC='zig cc -target x86_64-linux-gnu' \
-  go build -trimpath -buildmode=c-shared \
-  -o build/linux/amd64/oai-basispoints.so ./cmd/basispoints
-```
-
 ## 协议边界
 
 - 上游请求始终带 `Authorization: Bearer <access_token>`、`chatgpt-account-id`、`x-openai-account-id` 和 `x-basispoints-auth-mode: chatgpt`。
@@ -64,12 +50,10 @@ CGO_ENABLED=1 GOOS=linux GOARCH=amd64 \
 
 ## 版权与社区支持
 
-Copyright © 2026 JaxsonWang。本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [MIT License](LICENSE) 开源
 
-感谢 [LINUX DO 社区](https://linux.do/) 的支持。
+感谢 [LINUX DO 社区](https://linux.do/) 的支持
 
 <a href="https://linux.do/">
   <img src="docs/assets/linuxdo.png" alt="LINUX DO 社区" width="360" />
 </a>
-
-LINUX DO 标识归其权利人所有。
