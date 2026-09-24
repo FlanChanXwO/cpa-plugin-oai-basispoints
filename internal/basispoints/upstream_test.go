@@ -102,3 +102,22 @@ func TestLongCredentialIsRedactedBeforeErrorTruncation(t *testing.T) {
 		t.Fatal("truncated credential exposed")
 	}
 }
+
+func TestUpstreamDiagnosticReportsOnlySafeServiceTier(t *testing.T) {
+	for _, tc := range []struct {
+		tier any
+		want string
+	}{
+		{"priority", "priority"}, {"default", "default"}, {"private-request-data", "invalid"},
+		{map[string]any{"private": "request-data"}, "invalid"},
+	} {
+		err := upstreamRequestError(422, []byte(`{"message":"Invalid request body"}`), map[string]any{"service_tier": tc.tier}, credential{})
+		if !strings.Contains(err.Error(), "service_tier="+tc.want) || strings.Contains(err.Error(), "private") {
+			t.Fatalf("unsafe or missing tier: %v", err)
+		}
+	}
+	err := upstreamRequestError(422, nil, map[string]any{}, credential{})
+	if !strings.Contains(err.Error(), "service_tier=unspecified") {
+		t.Fatal("missing absent tier diagnostic")
+	}
+}

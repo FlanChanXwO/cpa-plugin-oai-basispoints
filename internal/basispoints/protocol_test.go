@@ -49,8 +49,8 @@ func TestPrepareResponsesBodyStripsToolsAndUsesNaturalLanguageCatalog(t *testing
 	if !strings.Contains(catalog, "get_weather") || !strings.Contains(catalog, "city (required)") {
 		t.Fatalf("catalog omitted natural language tool directory: %s", catalog)
 	}
-	if strings.Contains(catalog, `"properties"`) {
-		t.Fatalf("catalog unexpectedly included raw schema: %s", catalog)
+	if !strings.Contains(catalog, `"properties"`) {
+		t.Fatalf("catalog omitted the complete input schema: %s", catalog)
 	}
 	metadata := objectValue(body["metadata"])
 	if stringValue(metadata["turn_id"]) == "" || stringValue(metadata["task_id"]) == "" || metadata["agent_iteration"] != "1" {
@@ -84,7 +84,7 @@ func TestTransportCodeUsesToolAndArgsAndPreservesNativeItem(t *testing.T) {
 		})),
 	}
 	response := map[string]any{"output": []any{native}}
-	call, ok := extractNativeClientToolCall(response, source)
+	call, ok := extractNativeClientToolCall(native, clientToolSpecs(source))
 	if !ok {
 		t.Fatal("transport call was not decoded")
 	}

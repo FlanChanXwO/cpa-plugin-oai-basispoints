@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	Version        = "0.1.3"
+	Version        = "0.1.8"
 	Provider       = "oai-basispoints"
 	AuthProviderID = "codex"
 	PluginID       = Provider
@@ -89,10 +89,11 @@ type StreamResponse struct {
 	Headers http.Header `json:"Headers"`
 }
 
+// 非流式宿主回调直接序列化 pluginapi.HTTPResponse，字段名与流式 RPC 不同。
 type upstreamResponse struct {
-	StatusCode int         `json:"status_code"`
-	Headers    http.Header `json:"headers"`
-	Body       []byte      `json:"body"`
+	StatusCode int         `json:"StatusCode"`
+	Headers    http.Header `json:"Headers"`
+	Body       []byte      `json:"Body"`
 }
 
 type upstreamStream struct {

@@ -48,6 +48,10 @@ func (s *Service) prepareRequest(request ExecutorRequest) (map[string]any, crede
 	if err != nil {
 		return nil, credential{}, err
 	}
+	// 先按原始图片计算会话标识，再替换附件引用，避免上传 ID 改变 task/turn。
+	if err := s.uploadInputImages(request, prepared, c, cfg); err != nil {
+		return nil, credential{}, err
+	}
 	return prepared, c, nil
 }
 
@@ -276,5 +280,14 @@ func upstreamRequestError(status int, raw []byte, body map[string]any, c credent
 			}
 		}
 	}
-	return fail(status, "upstream_error", fmt.Sprintf("Basis Points HTTP %d: %s (reasoning_effort=%s; input_images=%d; original_detail_images=%d)", status, message, stringValue(body["reasoning_effort"]), images, originalDetails))
+	tier := "unspecified"
+	if value, exists := body["service_tier"]; exists {
+		switch stringValue(value) {
+		case "auto", "default", "flex", "priority", "scale":
+			tier = stringValue(value)
+		default:
+			tier = "invalid"
+		}
+	}
+	return fail(status, "upstream_error", fmt.Sprintf("Basis Points HTTP %d: %s (reasoning_effort=%s; service_tier=%s; input_images=%d; original_detail_images=%d)", status, message, stringValue(body["reasoning_effort"]), tier, images, originalDetails))
 }

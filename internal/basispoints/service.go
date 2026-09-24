@@ -11,10 +11,11 @@ import (
 )
 
 type Service struct {
-	mu      sync.RWMutex
-	cfg     Config
-	host    HostCall
-	stopped bool
+	attachments attachmentCache
+	mu          sync.RWMutex
+	cfg         Config
+	host        HostCall
+	stopped     bool
 }
 
 func NewService() *Service {
@@ -102,6 +103,8 @@ func (s *Service) Handle(method string, raw json.RawMessage) (any, error) {
 		return authRefresh(raw)
 	case "model.register", "model.static", "model.for_auth":
 		return modelRegistration(s.config()), nil
+	case "response.intercept_after":
+		return s.interceptModelCatalog(raw)
 	case "executor.execute":
 		return s.execute(raw, false)
 	case "executor.execute_stream":
@@ -249,6 +252,7 @@ func registration(cfg Config) map[string]any {
 			"executor_model_scope":    "both",
 			"executor_input_formats":  []string{"openai-response"},
 			"executor_output_formats": []string{"openai-response"},
+			"response_interceptor":    true,
 			"management_api":          false,
 		},
 		"config": cfg,

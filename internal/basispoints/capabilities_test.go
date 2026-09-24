@@ -48,8 +48,8 @@ func TestModelRegistrationAdvertisesImagesAndReasoningLevels(t *testing.T) {
 	}
 }
 
-func TestPrepareRequestPreservesImagesAndReasoningEffort(t *testing.T) {
-	images := []string{"https://example.com/image.png", "data:image/png;base64,iVBORw0KGgo="}
+func TestPrepareRequestPreservesRemoteImagesAndReasoningEffort(t *testing.T) {
+	images := []string{"https://example.com/image.png"}
 	efforts := []struct{ input, want string }{
 		{"low", "low"}, {"medium", "medium"}, {"high", "high"}, {"xhigh", "xhigh"},
 		{"max", "xhigh"}, {"ultra", "ultra"}, {" MAX ", "xhigh"}, {"", "medium"},
@@ -93,5 +93,50 @@ func TestAuthParseRejectsMalformedNativeStorage(t *testing.T) {
 	_, err := authParse(jsonBytes(authParseRequest{Provider: AuthProviderID, FileName: "invalid.json", RawJSON: raw}))
 	if err == nil {
 		t.Fatal("malformed native credential was accepted")
+	}
+}
+
+func TestPrepareRequestPreservesServiceTier(t *testing.T) {
+	for _, tier := range []string{"", "auto", "default", "priority", "flex"} {
+		t.Run("tier_"+tier, func(t *testing.T) {
+			source := map[string]any{"model": DefaultModelID, "input": "Reply OK"}
+			if tier != "" {
+				source["service_tier"] = tier
+			}
+			raw := jsonBytes(source)
+			for _, original := range []bool{true, false} {
+				request := ExecutorRequest{Model: DefaultModelID, Payload: raw, StorageJSON: jsonBytes(map[string]any{"access_token": "test-access", "account_id": "test-account"})}
+				if original {
+					request.OriginalRequest = raw
+				}
+				body, _, err := NewService().prepareRequest(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, exists := body["service_tier"]
+				if tier == "" {
+					if exists {
+						t.Fatalf("default request unexpectedly sets service_tier: %v", got)
+					}
+				} else if !exists || got != tier {
+					t.Fatalf("service_tier = %v, want %q", got, tier)
+				}
+			}
+		})
+	}
+}
+
+func TestModelRegistrationUsesExistingResponseInterceptor(t *testing.T) {
+	cfg := defaultConfig()
+	capabilities := registration(cfg)["capabilities"].(map[string]any)
+	if capabilities["response_interceptor"] != true {
+		t.Fatal("model catalog interceptor is not registered")
+	}
+	for _, model := range modelRegistration(cfg)["Models"].([]map[string]any) {
+		for _, field := range []string{"MetadataModelID", "SupportedServiceTiers", "ContextLength"} {
+			if _, exists := model[field]; exists {
+				t.Fatalf("unexpected host metadata dependency: %s", field)
+			}
+		}
 	}
 }
