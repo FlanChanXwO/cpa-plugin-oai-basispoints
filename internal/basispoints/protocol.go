@@ -606,13 +606,24 @@ func parseArguments(value any) map[string]any {
 	if !ok || strings.TrimSpace(text) == "" {
 		return nil
 	}
+	trimmed := strings.TrimSpace(text)
+	// 剥离可能存在的 markdown 代码块 (```json ... ``` 或 ``` ...)
+	if strings.HasPrefix(trimmed, "```") {
+		lines := strings.Split(trimmed, "\n")
+		if len(lines) >= 2 && strings.HasPrefix(lines[0], "```") {
+			lines = lines[1:]
+			if len(lines) > 0 && strings.HasPrefix(strings.TrimSpace(lines[len(lines)-1]), "```") {
+				lines = lines[:len(lines)-1]
+			}
+			trimmed = strings.TrimSpace(strings.Join(lines, "\n"))
+		}
+	}
 	var object map[string]any
-	decoder := json.NewDecoder(strings.NewReader(text))
+	decoder := json.NewDecoder(strings.NewReader(trimmed))
 	decoder.UseNumber()
 	if decoder.Decode(&object) != nil {
 		return nil
 	}
-	// 一次调用只能包含一个 JSON 对象，不能静默忽略尾随内容。
 	var extra any
 	if decoder.Decode(&extra) != io.EOF {
 		return nil
@@ -646,89 +657,51 @@ func schemaMatches(value any, schema map[string]any) bool {
 	if len(schema) == 0 {
 		return true
 	}
-	if alternatives, ok := schema["type"].([]any); ok {
-		for _, alternative := range alternatives {
-			copy := cloneObject(schema)
-			copy["type"] = alternative
-			if schemaMatches(value, copy) {
-				return true
-			}
-		}
-		return false
-	}
-	switch stringValue(schema["type"]) {
-	case "object":
-		object := objectValue(value)
-		if object == nil {
-			return false
-		}
-		if required, ok := schema["required"].([]any); ok {
-			for _, name := range required {
-				if _, exists := object[stringValue(name)]; !exists {
-					return false
+	// 容错：客户端工具参数校验采用宽容模式，主要由客户端本体进行最终参数校验，
+	// 避免上游模型多出/微调属性或类型微差导致整次会话被 502 中断。
+	if valObj, ok := value.(map[string]any); ok {
+		if req, ok := schema["required"].([]any); ok {
+			for _, r := range req {
+				reqKey := stringValue(r)
+				if reqKey != "" {
+					if _, has := valObj[reqKey]; !has {
+						return false
+					}
 				}
 			}
 		}
-		properties := objectValue(schema["properties"])
-		for key, nested := range object {
-			if properties == nil {
-				continue
-			}
-			nestedSchema := objectValue(properties[key])
-			if nestedSchema == nil {
-				if schema["additionalProperties"] == false {
-					return false
-				}
-				continue
-			}
-			if !schemaMatches(nested, nestedSchema) {
-				return false
-			}
-		}
-	case "array":
-		items, ok := value.([]any)
-		if !ok {
-			return false
-		}
-		if itemSchema := objectValue(schema["items"]); itemSchema != nil {
-			for _, item := range items {
-				if !schemaMatches(item, itemSchema) {
-					return false
-				}
-			}
-		}
-	case "string":
-		if _, ok := value.(string); !ok {
-			return false
-		}
-	case "integer", "number":
-		switch value.(type) {
-		case json.Number, float64, int, int64:
-		default:
-			return false
-		}
-	case "boolean":
-		if _, ok := value.(bool); !ok {
-			return false
-		}
-	case "null":
-		if value != nil {
-			return false
-		}
-	}
-	if enum, ok := schema["enum"].([]any); ok && len(enum) > 0 {
-		matched := false
-		for _, option := range enum {
-			if fmt.Sprint(option) == fmt.Sprint(value) {
-				matched = true
-				break
-			}
-		}
-		if !matched {
-			return false
-		}
+		return true
 	}
 	return true
+}
+
+// 检查 arguments 格式，支持 json 字符串与对象容错
+func extractArguments(inner map[string]any, spec toolSpec) (map[string]any, bool) {
+	arguments := inner["args"]
+	if arguments == nil {
+		arguments = inner["arguments"]
+	}
+	parsed := parseArguments(arguments)
+	if parsed == nil {
+		return nil, false
+	}
+	schema := firstMap(spec.Spec, "parameters", "inputSchema", "input_schema")
+	if schema != nil {
+		if !schemaMatches(parsed, schema) {
+			// 如果严格校验失败，检查是否满足最基本 required 字段
+			if req, ok := schema["required"].([]any); ok {
+				for _, r := range req {
+					reqKey := stringValue(r)
+					if reqKey != "" {
+						if _, has := parsed[reqKey]; !has {
+							return nil, false
+						}
+					}
+				}
+			}
+		}
+	}
+	return parsed, true
 }
 
 func extractNativeClientToolCall(native map[string]any, specs map[string]toolSpec) (map[string]any, bool) {
@@ -774,12 +747,8 @@ func extractNativeClientToolCall(native map[string]any, specs map[string]toolSpe
 		result["type"] = "custom_tool_call"
 		result["input"] = input
 	} else {
-		arguments := inner["args"]
-		if arguments == nil {
-			arguments = inner["arguments"]
-		}
-		parsed := parseArguments(arguments)
-		if parsed == nil || !schemaMatches(parsed, firstMap(spec.Spec, "parameters", "inputSchema", "input_schema")) {
+		parsed, ok := extractArguments(inner, spec)
+		if !ok {
 			return nil, false
 		}
 		result["arguments"] = string(jsonBytes(parsed))
