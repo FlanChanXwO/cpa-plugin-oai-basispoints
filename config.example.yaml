@@ -1,0 +1,11 @@
+# CPA plugin configuration. The default model is exposed as
+# gpt-6-astra-basispoints and is sent upstream as gpt-6-astra.
+responses_url: https://bps.openai.com/basispoints/api/responses
+upstream_model: gpt-6-astra
+models:
+  - gpt-6-astra-basispoints
+timeout_seconds: 300
+max_response_bytes: 67108864
+auth_mode: chatgpt
+# Optional authoritative Basis Points tools catalog version.
+# tools_version_id: tools-excel-core-2026-06-16-3af59f22
