@@ -16,7 +16,8 @@
       ],
       "install": {
         "type": "github-release"
-      }
+      },
+      "license": "MIT"
     }
   ]
 }
